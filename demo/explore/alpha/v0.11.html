@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>迷霧森林探險家 v0.11</title>
+    <style>
+        :root {
+            --primary-green: #2d5a27;
+            --accent-orange: #e67e22;
+            --bg-color: #f0f4f0;
+            --danger-red: #c0392b;
+        }
+
+        body {
+            font-family: "Microsoft JhengHei", sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            overflow-x: hidden;
+            touch-action: none;
+        }
+
+        #game-wrapper {
+            width: 100%;
+            max-width: 600px;
+            padding: 20px;
+            box-sizing: border-box;
+            transition: transform 0.1s;
+            transform-origin: top center;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        /* 第一階段：背包 */
+        #backpack {
+            width: 150px;
+            height: 180px;
+            background: var(--primary-green);
+            color: white;
+            border-radius: 20px;
+            margin: 20px auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 4px solid transparent;
+        }
+        .drag-over { border-color: var(--accent-orange) !important; transform: scale(1.05); }
+
+        .item-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .item {
+            background: #eee;
+            padding: 10px 5px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            touch-action: none;
+        }
+
+        /* 第二階段：導航 */
+        #compass-area {
+            display: none;
+        }
+        #compass-visual {
+            width: 200px;
+            height: 200px;
+            margin: 20px auto;
+            position: relative;
+            background: url('https://cdn-icons-png.flaticon.com/512/149/149454.png') no-repeat center/contain;
+            transition: transform 0.2s ease-out;
+        }
+        #arrow {
+            width: 4px;
+            height: 100px;
+            background: var(--danger-red);
+            position: absolute;
+            left: 50%;
+            top: 0;
+            transform: translateX(-50%);
+        }
+
+        .gps-log {
+            text-align: left;
+            background: #333;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+
+        .btn {
+            background: var(--accent-orange);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .btn-danger { background: var(--danger-red); }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="game-wrapper">
+    <div id="stage-1" class="card">
+        <h2>🌲 迷霧森林 v0.11</h2>
+        <p>生存值: <span id="hp">100</span> | 包內物品: <span id="count">0</span>/6</p>
+        
+        <div id="backpack" ondrop="drop(event)" ondragover="allowDrop(event)" ondragleave="dragLeave(event)">
+            🎒 放入背包
+        </div>
+
+        <div class="item-grid" id="shelf"></div>
+        <button class="btn" onclick="startNavigation()">準備好了，出發！</button>
+    </div>
+
+    <div id="stage-2" class="card">
+        <h2>🧭 尋找出口</h2>
+        <p id="mission-text">正在計算逃生方位...</p>
+        
+        <div id="compass-visual">
+            <div id="arrow"></div>
+        </div>
+        
+        <p>手機水平旋轉以對準方向</p>
+        
+        <hr>
+        
+        <h3>📍 GPS 定位與暫存</h3>
+        <button class="btn" onclick="recordGPS()">紀錄當前座標</button>
+        <button class="btn btn-danger" onclick="clearLogs()">清空紀錄</button>
+        <div class="gps-log" id="gps-display">暫無紀錄資料</div>
+        
+        <button class="btn" style="margin-top:20px" onclick="location.reload()">重新挑戰</button>
+    </div>
+</div>
+
+<script>
+    // --- 遊戲邏輯變數 ---
+    let hp = 100;
+    let packedCount = 0;
+    const items = [
+        { name: "指北針", score: 20 }, { name: "急救箱", score: 20 },
+        { name: "等高線圖", score: 15 }, { name: "生鮮肉品", score: -30 },
+        { name: "乾糧", score: 10 }, { name: "雨衣", score: 10 }
+    ];
+
+    // --- 初始化 UI ---
+    const shelf = document.getElementById('shelf');
+    items.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.className = 'item';
+        div.innerText = item.name;
+        div.draggable = true;
+        div.id = 'item-' + index;
+        div.onclick = () => addItem('item-' + index); // 支援點選
+        div.ondragstart = (e) => e.dataTransfer.setData("text", e.target.id);
+        shelf.appendChild(div);
+    });
+
+    function allowDrop(e) { e.preventDefault(); document.getElementById('backpack').classList.add('drag-over'); }
+    function dragLeave(e) { document.getElementById('backpack').classList.remove('drag-over'); }
+    function drop(e) {
+        e.preventDefault();
+        dragLeave(e);
+        addItem(e.dataTransfer.getData("text"));
+    }
+
+    function addItem(id) {
+        const el = document.getElementById(id);
+        if (!el || el.style.opacity === "0.3" || packedCount >= 6) return;
+        
+        const itemName = el.innerText;
+        const itemData = items.find(i => i.name === itemName);
+        
+        hp += itemData.score;
+        packedCount++;
+        el.style.opacity = "0.3";
+        document.getElementById('hp').innerText = hp;
+        document.getElementById('count').innerText = packedCount;
+    }
+
+    // --- 導航與感測器邏輯 ---
+    let targetDegree = 0;
+    const directions = ["北", "東北", "東", "東南", "南", "西南", "西", "西北"];
+
+    function startNavigation() {
+        if (packedCount < 3) { alert("裝備不足，進入森林太危險了！"); return; }
+        document.getElementById('stage-1').classList.add('hidden');
+        document.getElementById('stage-2').style.display = 'block';
+        
+        targetDegree = Math.floor(Math.random() * 360);
+        const dirText = directions[Math.round(targetDegree / 45) % 8];
+        document.getElementById('mission-text').innerText = `任務：請向【${dirText}】方前進逃離迷霧！`;
+        
+        initSensors();
+        updateGPSDisplay();
+    }
+
+    function initSensors() {
+        // 要求 iOS 權限 (iOS 13+)
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            DeviceOrientationEvent.requestPermission()
+                .then(response => { if (response == 'granted') window.addEventListener('deviceorientation', handleOrientation); })
+                .catch(console.error);
+        } else {
+            window.addEventListener('deviceorientation', handleOrientation);
+        }
+    }
+
+    function handleOrientation(event) {
+        let compass = event.webkitCompassHeading || Math.abs(event.alpha - 360);
+        document.getElementById('compass-visual').style.transform = `rotate(${-compass}deg)`;
+    }
+
+    // --- GPS 與 LocalStorage ---
+    function recordGPS() {
+        if (!navigator.geolocation) { alert("您的瀏覽器不支持 GPS"); return; }
+        
+        navigator.geolocation.getCurrentPosition(pos => {
+            const entry = {
+                time: new Date().toLocaleTimeString(),
+                lat: pos.coords.latitude.toFixed(4),
+                lng: pos.coords.longitude.toFixed(4)
+            };
+            saveToLocal(entry);
+            updateGPSDisplay();
+        }, () => alert("無法取得位置，請確認是否開啟定位權限"));
+    }
+
+    function saveToLocal(data) {
+        let logs = JSON.parse(localStorage.getItem('explorer_gps') || "[]");
+        logs.push(data);
+        localStorage.setItem('explorer_gps', JSON.stringify(logs));
+    }
+
+    function updateGPSDisplay() {
+        let logs = JSON.parse(localStorage.getItem('explorer_gps') || "[]");
+        const display = document.getElementById('gps-display');
+        if (logs.length === 0) {
+            display.innerText = "暫無紀錄資料";
+            return;
+        }
+        display.innerHTML = logs.map(l => `[${l.time}] 緯:${l.lat} 經:${l.lng}`).join('<br>');
+    }
+
+    function clearLogs() {
+        if(confirm("確定要刪除所有暫存紀錄嗎？")) {
+            localStorage.removeItem('explorer_gps');
+            updateGPSDisplay();
+        }
+    }
+
+    // --- 縮放邏輯 (雙指/滾輪) ---
+    let currentScale = 1;
+    window.addEventListener('wheel', (e) => {
+        if (e.ctrlKey) {
+            e.preventDefault();
+            currentScale += e.deltaY * -0.001;
+            currentScale = Math.min(Math.max(0.5, currentScale), 2);
+            document.getElementById('game-wrapper').style.transform = `scale(${currentScale})`;
+        }
+    }, { passive: false });
+</script>
+
+</body>
+</html>

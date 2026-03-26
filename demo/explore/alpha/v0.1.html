@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>迷霧森林探險家 v0.1</title>
+    <style>
+        :root {
+            --primary-green: #2d5a27;
+            --accent-orange: #e67e22;
+            --bg-color: #f0f4f0;
+        }
+
+        body {
+            font-family: "Microsoft JhengHei", sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            touch-action: manipulation;
+        }
+
+        #game-container {
+            max-width: 800px;
+            width: 100%;
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stats-bar {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            background: #eee;
+            padding: 10px;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+
+        .game-area {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        #item-shelf {
+            width: 100%;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 10px;
+            padding: 15px;
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+        }
+
+        .item {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px 5px;
+            cursor: grab;
+            font-size: 14px;
+            transition: transform 0.2s;
+            user-select: none;
+            touch-action: none;
+        }
+
+        .item:active { cursor: grabbing; }
+
+        #backpack {
+            width: 200px;
+            height: 250px;
+            background: var(--primary-green);
+            color: white;
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 20px auto;
+            position: relative;
+            transition: all 0.3s;
+        }
+
+        #backpack.drag-over {
+            background: #3e7a36;
+            transform: scale(1.05);
+        }
+
+        .backpack-label { font-weight: bold; margin-bottom: 10px; }
+        #backpack-count { font-size: 12px; }
+
+        .btn {
+            background: var(--accent-orange);
+            color: white;
+            border: none;
+            padding: 10px 30px;
+            border-radius: 25px;
+            font-size: 18px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        #message {
+            margin-top: 15px;
+            color: #d35400;
+            font-weight: bold;
+            min-height: 24px;
+        }
+
+        /* 簡單的縮放支援 */
+        #game-wrapper {
+            transition: transform 0.1s;
+            transform-origin: top center;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-wrapper">
+    <div id="game-container">
+        <h2>🌲 迷霧森林探險 v0.1</h2>
+        <p>扮演初級探險家，在限時內挑選最正確的裝備！</p>
+
+        <div class="stats-bar">
+            <div>生存值: <span id="hp">100</span></div>
+            <div>剩餘時間: <span id="timer">60</span>s</div>
+        </div>
+
+        <div id="backpack" ondrop="drop(event)" ondragover="allowDrop(event)" ondragleave="dragLeave(event)">
+            <div class="backpack-label">🎒 你的背包</div>
+            <div id="backpack-count">已放入: 0 / 6</div>
+        </div>
+
+        <div id="message"></div>
+
+        <h3>物品區 (請拖曳物品至背包)</h3>
+        <div id="item-shelf">
+            </div>
+
+        <button class="btn" onclick="finishGame()">出發探險！</button>
+    </div>
+</div>
+
+<script>
+    const itemsData = [
+        { id: 1, name: "急救箱", score: 20, bad: false },
+        { id: 2, name: "指北針", score: 15, bad: false },
+        { id: 3, name: "生鮮肉品", score: -30, bad: true, msg: "生鮮肉品在野外容易腐敗！" },
+        { id: 4, name: "等高線地圖", score: 15, bad: false },
+        { id: 5, name: "乾糧", score: 10, bad: false },
+        { id: 6, name: "重型遊戲機", score: -10, bad: true, msg: "這太重了且沒電就沒用了！" },
+        { id: 7, name: "環保餐具", score: 5, bad: false },
+        { id: 8, name: "水壺", score: 10, bad: false },
+        { id: 9, name: "雨衣", score: 15, bad: false },
+        { id: 10, name: "大包零食", score: -5, bad: true, msg: "佔空間且營養價值低。" },
+        { id: 11, name: "打火機", score: 10, bad: false },
+        { id: 12, name: "筆記型電腦", score: -20, bad: true, msg: "森林裡沒有 Wi-Fi 且增加負擔。" }
+    ];
+
+    let hp = 100;
+    let timeLeft = 60;
+    let packedItems = [];
+    const maxCapacity = 6;
+    let scale = 1;
+
+    // 初始化物品
+    const shelf = document.getElementById('item-shelf');
+    itemsData.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'item';
+        div.innerText = item.name;
+        div.draggable = true;
+        div.id = `item-${item.id}`;
+        div.dataset.info = JSON.stringify(item);
+        
+        // 滑鼠拖曳
+        div.ondragstart = drag;
+        
+        // 觸控支援
+        div.addEventListener('touchstart', handleTouchStart, false);
+        div.addEventListener('touchmove', handleTouchMove, false);
+        div.addEventListener('touchend', handleTouchEnd, false);
+        
+        shelf.appendChild(div);
+    });
+
+    // 拖曳邏輯
+    function allowDrop(ev) {
+        ev.preventDefault();
+        document.getElementById('backpack').classList.add('drag-over');
+    }
+
+    function dragLeave(ev) {
+        document.getElementById('backpack').classList.remove('drag-over');
+    }
+
+    function drag(ev) {
+        ev.dataTransfer.setData("text", ev.target.id);
+    }
+
+    function drop(ev) {
+        ev.preventDefault();
+        document.getElementById('backpack').classList.remove('drag-over');
+        const id = ev.dataTransfer.getData("text");
+        addItemToBackpack(id);
+    }
+
+    function addItemToBackpack(elementId) {
+        if (packedItems.length >= maxCapacity) {
+            document.getElementById('message').innerText = "背包已經裝不下了！";
+            return;
+        }
+
+        const el = document.getElementById(elementId);
+        if (!el || el.style.visibility === 'hidden') return;
+
+        const info = JSON.parse(el.dataset.info);
+        packedItems.push(info);
+        
+        // 處理生存值
+        if (info.bad) {
+            hp += info.score;
+            document.getElementById('message').innerText = info.msg;
+        } else {
+            document.getElementById('message').innerText = `成功放入 ${info.name}！`;
+        }
+        
+        // 更新 UI
+        el.style.visibility = 'hidden';
+        document.getElementById('hp').innerText = hp;
+        document.getElementById('backpack-count').innerText = `已放入: ${packedItems.length} / ${maxCapacity}`;
+    }
+
+    // 觸控拖曳邏輯 (簡易模擬)
+    let activeTouchItem = null;
+    function handleTouchStart(e) {
+        activeTouchItem = e.target;
+    }
+    function handleTouchMove(e) {
+        e.preventDefault(); // 防止滾動
+    }
+    function handleTouchEnd(e) {
+        const touch = e.changedTouches[0];
+        const backpack = document.getElementById('backpack');
+        const rect = backpack.getBoundingClientRect();
+        
+        if (touch.clientX >= rect.left && touch.clientX <= rect.right &&
+            touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
+            addItemToBackpack(activeTouchItem.id);
+        }
+        activeTouchItem = null;
+    }
+
+    // 滾輪縮放邏輯
+    window.addEventListener('wheel', (e) => {
+        if (e.ctrlKey) {
+            e.preventDefault();
+            scale += e.deltaY * -0.001;
+            scale = Math.min(Math.max(.5, scale), 2);
+            document.getElementById('game-wrapper').style.transform = `scale(${scale})`;
+        }
+    }, { passive: false });
+
+    // 計時器
+    const timerInterval = setInterval(() => {
+        timeLeft--;
+        document.getElementById('timer').innerText = timeLeft;
+        if (timeLeft <= 0) {
+            clearInterval(timerInterval);
+            finishGame();
+        }
+    }, 1000);
+
+    function finishGame() {
+        clearInterval(timerInterval);
+        let result = "";
+        if (hp >= 80 && packedItems.length >= 4) {
+            result = "恭喜！你獲得了【荒野探險家】徽章！";
+        } else if (hp > 50) {
+            result = "勉強完成挑戰，但準備不夠周全，下次再加油！";
+        } else {
+            result = "生存值過低...探險失敗！請重新學習裝備知識。";
+        }
+        alert(`遊戲結束！\n最終生存值：${hp}\n${result}`);
+        location.reload();
+    }
+</script>
+
+</body>
+</html>
